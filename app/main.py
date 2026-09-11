@@ -3,8 +3,26 @@ from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 import httpx
 from typing import Dict, Optional
+from contextlib import asynccontextmanager
+import logging
 
-app = FastAPI(title="Project A.I.M. Orchestrator")
+logging.basicConfig(
+    level=logging.INFO, 
+    format="%(asctime)s | %(levelname)-8s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger("AIM_Core")
+
+http_client = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global http_client
+    http_client = httpx.AsyncClient()
+    yield
+    await http_client.aclose()
+
+app = FastAPI(title="Project A.I.M. Orchestrator", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,12 +51,12 @@ class ConnectionManager:
         await websocket.accept()
         self.active_sessions[session_id] = websocket
         self.states[session_id] = SessionState(session_id)
-        print(f"[+] Client {session_id} connected.")
+        logger.info(f"Client {session_id} connected to A.I.M.")
 
     def disconnect(self, session_id: str):
         self.active_sessions.pop(session_id, None)
         self.states.pop(session_id, None)
-        print(f"[-] Client {session_id} disconnected.")
+        logger.info(f"Client {session_id} disconnected.")
 
     async def send_json(self, session_id: str, data: dict):
         if session_id in self.active_sessions:
@@ -54,60 +72,63 @@ async def evaluate_and_respond(session_id: str):
     candidate_answer = " ".join(state.current_transcript)
     avg_eye_contact = sum(state.eye_contact_history) // len(state.eye_contact_history) if state.eye_contact_history else 100
 
-    print(f"\n[A.I.M. Brain] Processing Answer: '{candidate_answer}' (Avg Eye Contact: {avg_eye_contact}%)")
+    logger.info(f"Processing Answer: '{candidate_answer}' (Avg Eye Contact: {avg_eye_contact}%)")
+    system_prompt = (
+        "You are an expert technical interviewer conducting a mock interview for Project A.I.M. "
+        "Strictly adhere to these operational constraints:\n"
+        f"1. CANDIDATE RESUME CONTEXT:\n{RESUME_CONTEXT}\n"
+        "2. Internally evaluate the candidate's last answer using the STAR method, but DO NOT output the STAR breakdown.\n"
+        "3. Output ONLY a single, direct, challenging technical follow-up question grounded in their resume and latest answer.\n"
+        "4. Keep your total response under 25 words. Never explain your reasoning."
+    )
+    
+    tech_payload = {
+        "model": "llama3.2",
+        "prompt": f"{system_prompt}\n\nCandidate Answer: {candidate_answer}\nInterviewer:",
+        "stream": False
+    }
+    
+    tech_task = http_client.post("http://localhost:11434/api/generate", json=tech_payload, timeout=60.0)
+    tasks = [tech_task]
 
-    async with httpx.AsyncClient() as client:
-        system_prompt = (
-            "You are an expert technical interviewer conducting a mock interview for Project A.I.M. "
-            "Strictly adhere to these operational constraints:\n"
-            f"1. CANDIDATE RESUME CONTEXT:\n{RESUME_CONTEXT}\n"
-            "2. Internally evaluate the candidate's last answer using the STAR method, but DO NOT output the STAR breakdown.\n"
-            "3. Output ONLY a single, direct, challenging technical follow-up question grounded in their resume and latest answer.\n"
-            "4. Keep your total response under 25 words. Never explain your reasoning."
+    if avg_eye_contact < 70:
+        behavioral_prompt = (
+            f"The candidate's eye contact dropped to {avg_eye_contact}%. "
+            "Write a single, encouraging sentence reminding them to look at the camera. "
+            "Do not apologize or explain."
         )
-        tech_payload = {
+        beh_payload = {
             "model": "llama3.2",
-            "prompt": f"{system_prompt}\n\nCandidate Answer: {candidate_answer}\nInterviewer:",
+            "prompt": behavioral_prompt,
             "stream": False
         }
-        tech_task = client.post("http://localhost:11434/api/generate", json=tech_payload, timeout=60.0)
-        tasks = [tech_task]
+        
+        beh_task = http_client.post("http://localhost:11434/api/generate", json=beh_payload, timeout=10.0)
+        tasks.append(beh_task)
 
-        if avg_eye_contact < 70:
-            behavioral_prompt = (
-                f"The candidate's eye contact dropped to {avg_eye_contact}%. "
-                "Write a single, encouraging sentence reminding them to look at the camera. "
-                "Do not apologize or explain."
-            )
-            beh_payload = {
-                "model": "llama3.2",
-                "prompt": behavioral_prompt,
-                "stream": False
-            }
-            beh_task = client.post("http://localhost:11434/api/generate", json=beh_payload, timeout=10.0)
-            tasks.append(beh_task)
+    try:
+        # Restore the parsing and sending logic!
+        results = await asyncio.gather(*tasks)
+        
+        technical_question = results[0].json().get("response", "").strip()
+        
+        if len(results) > 1:
+            dynamic_warning = results[1].json().get("response", "").strip()
+            final_response = f"{dynamic_warning} {technical_question}"
+        else:
+            final_response = technical_question
 
-        try:
-            results = await asyncio.gather(*tasks)
-            technical_question = results[0].json().get("response", "").strip()
-            
-            if len(results) > 1:
-                dynamic_warning = results[1].json().get("response", "").strip()
-                final_response = f"{dynamic_warning} {technical_question}"
-            else:
-                final_response = technical_question
-
-            await manager.send_json(session_id, {
-                "type": "FOLLOW_UP_QUESTION", 
-                "payload": {"text": final_response}
-            })
-        except Exception as e:
-            print(f"[Error] Ollama Inference Failed: {e}")
+        # Send back to Android
+        await manager.send_json(session_id, {
+            "type": "FOLLOW_UP_QUESTION", 
+            "payload": {"text": final_response}
+        })
+    except Exception as e:
+       logger.error(f"Ollama Inference Failed: {e}")
 
     state.current_transcript.clear()
     state.eye_contact_history.clear()
-    print("[A.I.M. Brain] Memory wiped. Listening for next answer...\n")
-
+    logger.info("Memory wiped. Listening for next answer...")
 async def trigger_silence_countdown(session_id: str, delay_seconds: float):
     try:
         await asyncio.sleep(delay_seconds)
@@ -115,7 +136,6 @@ async def trigger_silence_countdown(session_id: str, delay_seconds: float):
     except asyncio.CancelledError:
         pass
 
-# 4. WebSocket Route
 @app.websocket("/ws/interview/{session_id}")
 async def interview_endpoint(websocket: WebSocket, session_id: str = "default_session"):
     await manager.connect(session_id, websocket)
@@ -124,19 +144,25 @@ async def interview_endpoint(websocket: WebSocket, session_id: str = "default_se
     try:
         while True:
             client_telemetry = await websocket.receive_json()
+            
             chunk = client_telemetry.get("payload", {}).get("transcript_chunk", "")
             eye_score = client_telemetry.get("payload", {}).get("eye_contact_score", 100)
 
+            state.eye_contact_history.append(eye_score)
+            if len(state.eye_contact_history) > 100:
+                state.eye_contact_history.pop(0)
+
             if chunk.strip():
                 state.current_transcript.append(chunk)
-            state.eye_contact_history.append(eye_score)
-
-            if state.debounce_task:
-                state.debounce_task.cancel()
-            
-            state.debounce_task = asyncio.create_task(
-                trigger_silence_countdown(session_id, state.silence_threshold_seconds)
-            )
+                if len(state.current_transcript) > 50:
+                    state.current_transcript.pop(0)
+                
+                if state.debounce_task:
+                    state.debounce_task.cancel()
+                
+                state.debounce_task = asyncio.create_task(
+                    trigger_silence_countdown(session_id, state.silence_threshold_seconds)
+                )
             
     except WebSocketDisconnect:
         manager.disconnect(session_id)

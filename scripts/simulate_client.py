@@ -1,14 +1,23 @@
 import asyncio
 import json
 import websockets
+import logging
+
+# Configure client-side logger
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s.%(msecs)03d | CLIENT | %(levelname)-8s | %(message)s",
+    datefmt="%H:%M:%S"
+)
+logger = logging.getLogger("AIM_Client")
 
 SERVER_URI = "ws://127.0.0.1:8001/ws/interview/test-session-001"
 
 async def run_simulation():
-    print(f"Connecting to Project A.I.M. Core at {SERVER_URI}...")
+    logger.info(f"Connecting to Project A.I.M. Core at {SERVER_URI}...")
     
     async with websockets.connect(SERVER_URI, origin=None) as websocket:
-        print("Connected successfully! Starting telemetry streams...\n")
+        logger.info("Connected successfully! Starting telemetry streams...")
 
         async def send_vision_data():
             try:
@@ -28,7 +37,7 @@ async def run_simulation():
                     response = await websocket.recv()
                     data = json.loads(response)
                     if data.get("type") == "FOLLOW_UP_QUESTION":
-                        print(f"\n🔥 [A.I.M. AGENT REPLIES]: {data['payload']['text']}\n")
+                        logger.info(f"🔥 [A.I.M. AGENT REPLIES]: {data['payload']['text']}")
             except asyncio.CancelledError:
                 pass
 
@@ -41,24 +50,24 @@ async def run_simulation():
             " and deployed them to AWS."
         ]
 
-        print("--- Candidate starts speaking ---")
+        logger.info("--- Candidate starts speaking ---")
         for chunk in speech_chunks:
             payload = {
                 "type": "AUDIO_TELEMETRY",
                 "payload": {"transcript_chunk": chunk}
             }
             await websocket.send(json.dumps(payload))
-            print(f"Sent audio chunk: '{chunk}'")
+            logger.info(f"Sent audio chunk: '{chunk}'")
             await asyncio.sleep(1.0)
 
-        print("--- Candidate goes silent (Waiting for server debouncer...) ---")
+        logger.info("--- Candidate goes silent (Waiting for server debouncer...) ---")
         
         vision_task.cancel()
-    
+        
         await asyncio.sleep(5.0)
 
         listen_task.cancel()
-        print("Simulation complete. Disconnecting.")
+        logger.info("Simulation complete. Disconnecting.")
 
 if __name__ == "__main__":
     asyncio.run(run_simulation())
