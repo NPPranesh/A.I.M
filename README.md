@@ -66,7 +66,7 @@ Triggered automatically after 2.5 seconds of audio silence.
 
 1. **Install Dependencies:**
    ```bash
-   pip install fastapi uvicorn websockets httpx
+   pip install -r requirements.txt
    ```
 2. **Start Local Ollama:**
    Ensure Ollama is installed and running Llama 3.2 in the background.
