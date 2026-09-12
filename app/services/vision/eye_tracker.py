@@ -17,7 +17,7 @@ def download_model_if_needed():
 def find_working_camera():
     """Scans camera indices 0-3 using MSMF backend to find an active video stream."""
     for index in [0, 1, 2, 3]:
-        cap = cv2.VideoCapture(index, cv2.CAP_MSMF)
+        cap = cv2.VideoCapture(index)
         if cap.isOpened():
             ret, frame = cap.read()
             cap.release()
@@ -34,7 +34,10 @@ def run_eye_tracker():
         print("\n[ERROR] No active webcam feed found on indices 0-3.")
         return
 
-    base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
+    base_options = python.BaseOptions(
+    model_asset_path=MODEL_PATH,
+    delegate=python.BaseOptions.Delegate.CPU
+)
     options = vision.FaceLandmarkerOptions(
         base_options=base_options,
         output_face_blendshapes=True,
@@ -42,8 +45,7 @@ def run_eye_tracker():
     )
     detector = vision.FaceLandmarker.create_from_options(options)
 
-    # Initialize webcam using Media Foundation (MSMF) with fixed constraints
-    cap = cv2.VideoCapture(camera_index, cv2.CAP_MSMF)
+    cap = cv2.VideoCapture(camera_index)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_FPS, 30)
