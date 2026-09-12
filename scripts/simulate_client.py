@@ -3,7 +3,6 @@ import json
 import websockets
 import logging
 
-# Configure client-side logger
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s.%(msecs)03d | CLIENT | %(levelname)-8s | %(message)s",

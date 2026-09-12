@@ -118,7 +118,6 @@ async def evaluate_and_respond(session_id: str):
         else:
             final_response = technical_question
 
-        # Send back to Android
         await manager.send_json(session_id, {
             "type": "FOLLOW_UP_QUESTION", 
             "payload": {"text": final_response}
