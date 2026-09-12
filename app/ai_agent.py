@@ -18,11 +18,9 @@ async def generate_follow_up(candidate_answer: str, eye_contact: int) -> str:
     
     print(f"\n[Ollama] Local AI is thinking... (Eye Contact: {eye_contact}%)")
     
-    # We use AsyncClient so it doesn't freeze your FastAPI server!
     response = await AsyncClient().generate(
-        model='llama3.2',  # The model you just downloaded
+        model='llama3.2',  
         prompt=prompt
     )
     
-    # Ollama returns a dictionary, we just want the 'response' text
     return response['response']

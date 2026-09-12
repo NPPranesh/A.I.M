@@ -1,29 +1,48 @@
-from app.ai_agent import generate_follow_up
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 import asyncio
-import json
-import time
+import httpx
 from typing import Dict, Optional
+from contextlib import asynccontextmanager
+import logging
 
-# 1. Initialize the Project A.I.M. Server
-app = FastAPI(title="Project A.I.M. Orchestrator")
+logging.basicConfig(
+    level=logging.INFO, 
+    format="%(asctime)s | %(levelname)-8s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger("AIM_Core")
 
-# 2. Define the Memory State
+http_client = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global http_client
+    http_client = httpx.AsyncClient()
+    yield
+    await http_client.aclose()
+
+app = FastAPI(title="Project A.I.M. Orchestrator", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+RESUME_CONTEXT = "Candidate is a B.Tech IT student at VIT Vellore experienced in Python, FastAPI, and C programming."
+
 class SessionState:
-    """Holds the live data for a single interview session."""
     def __init__(self, session_id: str):
         self.session_id = session_id
-        
-        # Buffers for incoming Android telemetry
         self.current_transcript = [] 
         self.eye_contact_history = []
-        
-        # Turn-taking configuration
         self.silence_threshold_seconds = 2.5 
         self.debounce_task: Optional[asyncio.Task] = None
 
 class ConnectionManager:
-    """Tracks active phones connected to the A.I.M. backend."""
     def __init__(self):
         self.active_sessions: Dict[str, WebSocket] = {}
         self.states: Dict[str, SessionState] = {}
@@ -32,20 +51,17 @@ class ConnectionManager:
         await websocket.accept()
         self.active_sessions[session_id] = websocket
         self.states[session_id] = SessionState(session_id)
-        print(f"[+] Client {session_id} connected to A.I.M.")
+        logger.info(f"Client {session_id} connected to A.I.M.")
 
     def disconnect(self, session_id: str):
-        if session_id in self.active_sessions:
-            del self.active_sessions[session_id]
-        if session_id in self.states:
-            del self.states[session_id]
-        print(f"[-] Client {session_id} disconnected.")
+        self.active_sessions.pop(session_id, None)
+        self.states.pop(session_id, None)
+        logger.info(f"Client {session_id} disconnected.")
 
     async def send_json(self, session_id: str, data: dict):
         if session_id in self.active_sessions:
             await self.active_sessions[session_id].send_json(data)
 
-# Create a single global manager
 manager = ConnectionManager()
 
 async def evaluate_and_respond(session_id: str):
@@ -53,81 +69,99 @@ async def evaluate_and_respond(session_id: str):
     if not state or not state.current_transcript:
         return
 
-    full_answer = " ".join(state.current_transcript)
-    
-    # 1. Calculate the average eye contact!
-    if len(state.eye_contact_history) > 0:
-        avg_eye_contact = sum(state.eye_contact_history) // len(state.eye_contact_history)
-    else:
-        avg_eye_contact = 100 # Default if no data arrived
+    candidate_answer = " ".join(state.current_transcript)
+    avg_eye_contact = sum(state.eye_contact_history) // len(state.eye_contact_history) if state.eye_contact_history else 100
 
-    print(f"\n[A.I.M. Brain] User answered: '{full_answer}' (Eye Contact: {avg_eye_contact}%)")
+    logger.info(f"Processing Answer: '{candidate_answer}' (Avg Eye Contact: {avg_eye_contact}%)")
+    system_prompt = (
+        "You are an expert technical interviewer conducting a mock interview for Project A.I.M. "
+        "Strictly adhere to these operational constraints:\n"
+        f"1. CANDIDATE RESUME CONTEXT:\n{RESUME_CONTEXT}\n"
+        "2. Internally evaluate the candidate's last answer using the STAR method, but DO NOT output the STAR breakdown.\n"
+        "3. Output ONLY a single, direct, challenging technical follow-up question grounded in their resume and latest answer.\n"
+        "4. Keep your total response under 25 words. Never explain your reasoning."
+    )
+    
+    tech_payload = {
+        "model": "llama3.2",
+        "prompt": f"{system_prompt}\n\nCandidate Answer: {candidate_answer}\nInterviewer:",
+        "stream": False
+    }
+    
+    tech_task = http_client.post("http://localhost:11434/api/generate", json=tech_payload, timeout=60.0)
+    tasks = [tech_task]
+
+    if avg_eye_contact < 70:
+        behavioral_prompt = (
+            f"The candidate's eye contact dropped to {avg_eye_contact}%. "
+            "Write a single, encouraging sentence reminding them to look at the camera. "
+            "Do not apologize or explain."
+        )
+        beh_payload = {
+            "model": "llama3.2",
+            "prompt": behavioral_prompt,
+            "stream": False
+        }
+        
+        beh_task = http_client.post("http://localhost:11434/api/generate", json=beh_payload, timeout=10.0)
+        tasks.append(beh_task)
 
     try:
-        # 2. Pass BOTH the text and the vision score to Member 5's AI
-        ai_question = await generate_follow_up(full_answer, avg_eye_contact)
+        # Restore the parsing and sending logic!
+        results = await asyncio.gather(*tasks)
         
+        technical_question = results[0].json().get("response", "").strip()
+        
+        if len(results) > 1:
+            dynamic_warning = results[1].json().get("response", "").strip()
+            final_response = f"{dynamic_warning} {technical_question}"
+        else:
+            final_response = technical_question
+
         await manager.send_json(session_id, {
-            "type": "FOLLOW_UP_QUESTION",
-            "payload": {"text": ai_question}
+            "type": "FOLLOW_UP_QUESTION", 
+            "payload": {"text": final_response}
         })
-        
     except Exception as e:
-        print(f"[Error] Gemini API failed: {e}")
-    
-    # 3. Wipe BOTH memory buckets clean for the next question
+       logger.error(f"Ollama Inference Failed: {e}")
+
     state.current_transcript.clear()
     state.eye_contact_history.clear()
-    print("[A.I.M. Brain] Memory wiped. Listening for next answer...\n")
-
+    logger.info("Memory wiped. Listening for next answer...")
 async def trigger_silence_countdown(session_id: str, delay_seconds: float):
-    """The background timer that gets reset every time the user speaks."""
     try:
         await asyncio.sleep(delay_seconds)
-        # If we survive the sleep without being cancelled, trigger the AI!
         await evaluate_and_respond(session_id)
     except asyncio.CancelledError:
-        # The user spoke again! This timer gets cancelled and dies silently.
         pass
 
 @app.websocket("/ws/interview/{session_id}")
-async def interview_endpoint(websocket: WebSocket, session_id: str):
-    # Open the door and create the memory bucket
+async def interview_endpoint(websocket: WebSocket, session_id: str = "default_session"):
     await manager.connect(session_id, websocket)
     state = manager.states[session_id]
-
+    
     try:
         while True:
-            # Wait for data to arrive from the phone
-            raw_data = await websocket.receive_text()
-            message = json.loads(raw_data)
+            client_telemetry = await websocket.receive_json()
             
-            msg_type = message.get("type")
-            payload = message.get("payload", {})
+            chunk = client_telemetry.get("payload", {}).get("transcript_chunk", "")
+            eye_score = client_telemetry.get("payload", {}).get("eye_contact_score", 100)
 
-            # ROUTE 1: Vision Data
-            if msg_type == "VISION_TELEMETRY":
-                score = payload.get("eye_contact_score", 100)
-                state.eye_contact_history.append(score)
-                # We don't trigger AI here, just collect the stats.
+            state.eye_contact_history.append(eye_score)
+            if len(state.eye_contact_history) > 100:
+                state.eye_contact_history.pop(0)
 
-            # ROUTE 2: Audio Data
-            elif msg_type == "AUDIO_TELEMETRY":
-                chunk = payload.get("transcript_chunk", "")
-                if chunk.strip():
-                    state.current_transcript.append(chunk)
-                    print(f"[Audio] Received chunk: {chunk}")
-
-                    # THE DEBOUNCER LOGIC:
-                    # 1. Kill the old timer because the user is still speaking
-                    if state.debounce_task and not state.debounce_task.done():
-                        state.debounce_task.cancel()
-
-                    # 2. Start a fresh countdown timer
-                    state.debounce_task = asyncio.create_task(
-                        trigger_silence_countdown(session_id, state.silence_threshold_seconds)
-                    )
-
+            if chunk.strip():
+                state.current_transcript.append(chunk)
+                if len(state.current_transcript) > 50:
+                    state.current_transcript.pop(0)
+                
+                if state.debounce_task:
+                    state.debounce_task.cancel()
+                
+                state.debounce_task = asyncio.create_task(
+                    trigger_silence_countdown(session_id, state.silence_threshold_seconds)
+                )
+            
     except WebSocketDisconnect:
-        # If the app crashes or drops signal, clean up the memory
         manager.disconnect(session_id)
