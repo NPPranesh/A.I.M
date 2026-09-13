@@ -8,3 +8,6 @@ __pycache__/
 
 # Mac OS System Files
 .DS_Store
+
+# Local application data and uploads
+data/

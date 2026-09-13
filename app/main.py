@@ -1,5 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from app.ai_agent import load_resume_text
+from fastapi import Query
 import asyncio
 import httpx
 from typing import Dict, Optional
@@ -39,6 +41,12 @@ class SessionState:
         self.session_id = session_id
         self.current_transcript = [] 
         self.eye_contact_history = []
+
+        # Member 5's "Historical State" — resume text retrieved once per
+        # session and reused on every turn (cures the LLM's amnesia).
+        self.resume_context: str = "(No resume was provided for this candidate.)"
+
+        # Turn-taking configuration
         self.silence_threshold_seconds = 2.5 
         self.debounce_task: Optional[asyncio.Task] = None
 
@@ -139,7 +147,16 @@ async def trigger_silence_countdown(session_id: str, delay_seconds: float):
 async def interview_endpoint(websocket: WebSocket, session_id: str = "default_session"):
     await manager.connect(session_id, websocket)
     state = manager.states[session_id]
-    
+    resume_path = None
+    # RAG STEP 1 (Retrieval): pull the candidate's resume off disk once,
+    # up front, so every follow-up question this session can be grounded
+    # in it. Falls back to "<session_id>.pdf" in a resumes/ folder if the
+    # Android client didn't pass an explicit path.
+    resolved_path = resume_path or f"resumes/{session_id}.pdf"
+    state.resume_context = load_resume_text(resolved_path)
+    print(f"[A.I.M. Brain] Resume context loaded for {session_id} "
+          f"({len(state.resume_context)} chars) from '{resolved_path}'")
+
     try:
         while True:
             client_telemetry = await websocket.receive_json()
