@@ -39,6 +39,12 @@ h1,h2,h3{font-family:'Space Grotesk',sans-serif;letter-spacing:-.035em}.stMarkdo
 [data-testid="stMetricValue"]{font-family:'Space Grotesk',sans-serif}.stButton>button{border-radius:7px;border:1px solid var(--line);min-height:42px;font-weight:600}.stButton>button[kind="primary"]{background:var(--indigo);border-color:var(--indigo);color:white}.stTextInput input,.stTextArea textarea,.stSelectbox div[data-baseweb="select"]{background:rgba(255,255,255,.035);border-color:var(--line);color:var(--text)}
 .aim-card{background:linear-gradient(145deg,rgba(23,33,58,.88),rgba(17,24,43,.75));border:1px solid var(--line);border-radius:11px;padding:22px;height:100%}.eyebrow{color:var(--cyan);font-size:.7rem;letter-spacing:.13em;font-weight:700}.muted{color:var(--muted)}.score{font:600 56px 'Space Grotesk',sans-serif;letter-spacing:-.06em}.pill{display:inline-block;padding:5px 9px;border-radius:5px;background:rgba(103,216,161,.1);border:1px solid rgba(103,216,161,.22);color:var(--green);font-size:.75rem}.auth-wrap{max-width:430px;margin:8vh auto}.auth-card{background:linear-gradient(145deg,rgba(23,33,58,.95),rgba(17,24,43,.86));border:1px solid var(--line);border-radius:14px;padding:32px}.brand{font:700 24px 'Space Grotesk',sans-serif;letter-spacing:.06em}.brand-mark{display:inline-grid;place-items:center;width:31px;height:31px;margin-right:9px;background:linear-gradient(145deg,#8d86ff,#4540b9);clip-path:polygon(50% 0,100% 100%,72% 100%,50% 36%,28% 100%,0 100%)}.stProgress>div>div>div{background:linear-gradient(90deg,var(--indigo),var(--cyan))}
 .skill-tag{display:inline-block;padding:6px 12px;margin:4px 6px 4px 0;background:rgba(113,104,255,0.15);border:1px solid rgba(113,104,255,0.35);border-radius:16px;color:#f3f6ff;font-size:0.85rem}
+[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"]{gap:8px!important;}
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]{background:transparent;border-radius:8px;padding:10px 14px;width:100%;transition:all 0.2s ease;border:1px solid transparent;margin-bottom:0px;}
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover{background:rgba(255,255,255,0.04);border-color:var(--line);}
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child{display:none!important;}
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked){background:linear-gradient(145deg,rgba(23,33,58,0.9),rgba(17,24,43,0.95))!important;border:1px solid rgba(54,217,232,0.35)!important;}
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) *{color:var(--cyan)!important;font-weight:600;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -236,12 +242,20 @@ def sidebar() -> None:
     with st.sidebar:
         st.markdown('<div class="brand"><span class="brand-mark">A</span>AIM</div><p class="muted">Adaptive Interview Mentor</p>', unsafe_allow_html=True)
         st.write(f"Welcome, **{user['name']}**")
+        st.write("")
         
         pages = ["Home", "Interviews", "Progress", "Profile", "Resume", "Settings"]
-        current_idx = pages.index(st.session_state.current_page) if st.session_state.current_page in pages else 0
-        selected_page = st.radio("Navigate", pages, index=current_idx, label_visibility="collapsed")
+        current_page = st.session_state.get("current_page", "Home")
+        current_idx = pages.index(current_page) if current_page in pages else 0
         
-        if selected_page != st.session_state.current_page and st.session_state.current_page in pages:
+        selected_page = st.radio(
+            "Navigation", 
+            options=pages, 
+            index=current_idx, 
+            label_visibility="collapsed"
+        )
+        
+        if selected_page and selected_page != st.session_state.current_page:
             navigate_to(selected_page)
             
         st.divider()
