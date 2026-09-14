@@ -244,8 +244,12 @@ def sidebar() -> None:
         st.write(f"Welcome, **{user['name']}**")
         st.write("")
         
+        # Main visible navigation pages
         pages = ["Home", "Interviews", "Progress", "Profile", "Resume", "Settings"]
+        
         current_page = st.session_state.get("current_page", "Home")
+        
+        # Determine index safely (if on active interview screen, default selection stays clean)
         current_idx = pages.index(current_page) if current_page in pages else 0
         
         selected_page = st.radio(
@@ -255,7 +259,8 @@ def sidebar() -> None:
             label_visibility="collapsed"
         )
         
-        if selected_page and selected_page != st.session_state.current_page:
+        # Only navigate if the user explicitly clicked a DIFFERENT sidebar menu item
+        if selected_page != current_page and current_page in pages:
             navigate_to(selected_page)
             
         st.divider()
