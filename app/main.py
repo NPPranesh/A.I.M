@@ -1,6 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from app.ai_agent import load_resume_text
+from app.ai_agent import load_resume_text, generate_follow_up
 from fastapi import Query
 import asyncio
 import httpx
@@ -34,19 +34,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-RESUME_CONTEXT = "Candidate is a B.Tech IT student at VIT Vellore experienced in Python, FastAPI, and C programming."
-
 class SessionState:
     def __init__(self, session_id: str):
         self.session_id = session_id
         self.current_transcript = [] 
         self.eye_contact_history = []
 
-        # Member 5's "Historical State" — resume text retrieved once per
-        # session and reused on every turn (cures the LLM's amnesia).
         self.resume_context: str = "(No resume was provided for this candidate.)"
 
-        # Turn-taking configuration
         self.silence_threshold_seconds = 2.5 
         self.debounce_task: Optional[asyncio.Task] = None
 
@@ -81,61 +76,26 @@ async def evaluate_and_respond(session_id: str):
     avg_eye_contact = sum(state.eye_contact_history) // len(state.eye_contact_history) if state.eye_contact_history else 100
 
     logger.info(f"Processing Answer: '{candidate_answer}' (Avg Eye Contact: {avg_eye_contact}%)")
-    system_prompt = (
-        "You are an expert technical interviewer conducting a mock interview for Project A.I.M. "
-        "Strictly adhere to these operational constraints:\n"
-        f"1. CANDIDATE RESUME CONTEXT:\n{RESUME_CONTEXT}\n"
-        "2. Internally evaluate the candidate's last answer using the STAR method, but DO NOT output the STAR breakdown.\n"
-        "3. Output ONLY a single, direct, challenging technical follow-up question grounded in their resume and latest answer.\n"
-        "4. Keep your total response under 25 words. Never explain your reasoning."
-    )
-    
-    tech_payload = {
-        "model": "llama3.2",
-        "prompt": f"{system_prompt}\n\nCandidate Answer: {candidate_answer}\nInterviewer:",
-        "stream": False
-    }
-    
-    tech_task = http_client.post("http://localhost:11434/api/generate", json=tech_payload, timeout=60.0)
-    tasks = [tech_task]
-
-    if avg_eye_contact < 70:
-        behavioral_prompt = (
-            f"The candidate's eye contact dropped to {avg_eye_contact}%. "
-            "Write a single, encouraging sentence reminding them to look at the camera. "
-            "Do not apologize or explain."
-        )
-        beh_payload = {
-            "model": "llama3.2",
-            "prompt": behavioral_prompt,
-            "stream": False
-        }
-        
-        beh_task = http_client.post("http://localhost:11434/api/generate", json=beh_payload, timeout=10.0)
-        tasks.append(beh_task)
 
     try:
-        # Restore the parsing and sending logic!
-        results = await asyncio.gather(*tasks)
-        
-        technical_question = results[0].json().get("response", "").strip()
-        
-        if len(results) > 1:
-            dynamic_warning = results[1].json().get("response", "").strip()
-            final_response = f"{dynamic_warning} {technical_question}"
-        else:
-            final_response = technical_question
+        # MAGIC LINK: Call Viswa's function and pass the actual parsed resume text
+        final_response = await generate_follow_up(
+            candidate_answer=candidate_answer,
+            eye_contact=avg_eye_contact,
+            resume_context=state.resume_context
+        )
 
         await manager.send_json(session_id, {
             "type": "FOLLOW_UP_QUESTION", 
             "payload": {"text": final_response}
         })
     except Exception as e:
-       logger.error(f"Ollama Inference Failed: {e}")
+       logger.error(f"AI Agent Inference Failed: {e}")
 
     state.current_transcript.clear()
     state.eye_contact_history.clear()
     logger.info("Memory wiped. Listening for next answer...")
+    
 async def trigger_silence_countdown(session_id: str, delay_seconds: float):
     try:
         await asyncio.sleep(delay_seconds)
@@ -148,10 +108,6 @@ async def interview_endpoint(websocket: WebSocket, session_id: str = "default_se
     await manager.connect(session_id, websocket)
     state = manager.states[session_id]
     resume_path = None
-    # RAG STEP 1 (Retrieval): pull the candidate's resume off disk once,
-    # up front, so every follow-up question this session can be grounded
-    # in it. Falls back to "<session_id>.pdf" in a resumes/ folder if the
-    # Android client didn't pass an explicit path.
     resolved_path = resume_path or f"resumes/{session_id}.pdf"
     state.resume_context = load_resume_text(resolved_path)
     print(f"[A.I.M. Brain] Resume context loaded for {session_id} "

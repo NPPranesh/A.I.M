@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
 import re
 from collections import Counter
 from pathlib import Path
@@ -107,9 +108,19 @@ def generate_interview_question(
     normalised_difficulty = _normalise_difficulty(difficulty)
     previous_answers = previous_answers or []
     last_answer = _latest_answer(previous_answers)
-    query = " ".join([interview_type, normalised_difficulty, last_answer]).strip()
-    evidence = retrieve_resume_evidence(resume_context, query, limit=4)
+    
+    # 1. BUILD THE QUERY FIRST
+    if not last_answer:
+        # Drop 'interview_type' so the word "Technical" doesn't hijack the math.
+        # Use specific engineering keywords found in Karan's resume.
+        query = random.choice(["scalable", "migration", "database", "graphql", "infrastructure", "latency"])
+    else:
+        # For follow-ups, just search based on what the user actually said
+        query = last_answer.strip()
 
+    # 2. SEARCH THE RESUME SECOND
+    evidence = retrieve_resume_evidence(resume_context, query, limit=4)
+    
     prompt = f"""You are A.I.M., a rigorous but encouraging interview mentor.
 Create exactly one {normalised_difficulty.lower()} {interview_type} interview question.
 Ground it in the resume evidence below. If a prior answer is present, ask a

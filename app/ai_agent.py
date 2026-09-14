@@ -15,6 +15,7 @@ Three "state" variables feed every decision the model makes:
 from functools import lru_cache
 from ollama import AsyncClient
 from pypdf import PdfReader
+import random
 
 # ---------------------------------------------------------------------------
 # 1. RETRIEVAL — pull the candidate's resume off disk and cache it.
@@ -97,8 +98,6 @@ async def generate_follow_up(
 
     print(f"\n[Ollama] Local AI is thinking... (Eye Contact: {eye_contact}%)")
 
-    # AsyncClient + chat() so the resume/rules live in a system message and
-    # the live answer lives in a user message, instead of one giant string.
     response = await AsyncClient().chat(
         model="llama3.2",
         messages=[
@@ -106,8 +105,8 @@ async def generate_follow_up(
             {"role": "user", "content": candidate_answer},
         ],
         options={
-            "temperature": 0.4,  # keep questions focused, not rambly
-            "num_predict": 80,   # generous ceiling for a ~30-word answer
+            "temperature": 0.4,  
+            "num_predict": 80, 
         },
     )
 
