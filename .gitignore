@@ -1,13 +1,27 @@
-# Environments
+# Python Virtual Environments
 venv/
+.venv/
 env/
+ENV/
 
-# Python Cache
+# Python Bytecode & Cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# Mac OS System Files
+# Whisper / Hugging Face Model Downloads
+.cache/
+*.bin
+*.pt
+*.onnx
+
+# Uploaded Resumes & Local Storage
+resumes/*.pdf
+!resumes/.gitkeep
+
+# IDE & Operating System Files
+.vscode/
 .DS_Store
-
-# Local application data and uploads
-data/
+Thumbs.db
+*.log
